@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/sqardey/widget/internal/cache"
@@ -16,15 +20,42 @@ func main() {
 	cfg := config.Load()
 	tmz, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
-		log.Fatalf("Something went wrong, error: ", err)
+		log.Fatalf("failed to load timezone: %v", err)
 	}
-	parser := parser.New(cfg.JournalLogin, cfg.JournalPassword)
-	cache := cache.New(tmz)
-	handler := httptransport.NewHandler(cache, cfg.WidgetAPIKey)
-	cache.StartWorker(context.Background(), parser, cfg.RefreshInterval)
 
-	log.Printf("Server started on :%s", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {
-		log.Fatalf("server error: %v", err)
+	parserClient := parser.New(cfg.JournalLogin, cfg.JournalPassword)
+	scheduleCache := cache.New(tmz)
+	handler := httptransport.NewHandler(scheduleCache, cfg.WidgetAPIKey)
+
+	// Контекст для фонового воркера и остановки сервера
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	scheduleCache.StartWorker(ctx, parserClient, cfg.RefreshInterval)
+
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: handler.Routes(),
 	}
+
+	// Запуск HTTP-сервера в фоновой горутине
+	go func() {
+		log.Printf("Server started on :%s", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen error: %v", err)
+		}
+	}()
+
+	// Ожидание системного сигнала SIGINT / SIGTERM
+	<-ctx.Done()
+	log.Println("Shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server stopped cleanly")
 }
