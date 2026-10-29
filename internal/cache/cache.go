@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -51,7 +52,33 @@ func (c *ScheduleCache) GetWidgetData() domain.WidgetResponse {
 	return response
 }
 
-func (c *ScheduleCache) StartWorker(ctx context.Context,
-	p *parser.Parser, interval time.Duration) {
+func (c *ScheduleCache) StartWorker(ctx context.Context, p *parser.Parser, interval time.Duration) {
+	update := func() {
+		now := time.Now().In(c.Location)
+		classes, exam, err := p.FetchTodaySchedule(ctx, now)
+		if err != nil {
+			log.Printf("[ERROR] failed to fetch schedule: %v", err)
+			return
+		}
+		c.Update(classes, exam)
+		log.Printf("[INFO] schedule updated: %d classes today, exam=%v", len(classes), exam != nil)
+	}
 
+	// Сразу обновляем кэш при запуске сервера
+	update()
+
+	// Дальше обновляем по таймеру в фоне
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				update()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }

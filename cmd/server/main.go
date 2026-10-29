@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/sqardey/widget/internal/cache"
 	"github.com/sqardey/widget/internal/config"
 	"github.com/sqardey/widget/internal/parser"
+	httptransport "github.com/sqardey/widget/internal/transport/http"
 )
 
 func main() {
@@ -16,10 +18,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Something went wrong, error: ", err)
 	}
-	parser := parser.New()
+	parser := parser.New(cfg.JournalLogin, cfg.JournalPassword)
 	cache := cache.New(tmz)
-	http_transport
 	handler := httptransport.NewHandler(cache, cfg.WidgetAPIKey)
+	cache.StartWorker(context.Background(), parser, cfg.RefreshInterval)
 
 	log.Printf("Server started on :%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, handler.Routes()); err != nil {

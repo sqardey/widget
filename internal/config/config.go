@@ -1,11 +1,15 @@
 package config
 
 import (
+	"log"
 	"os"
+	"strings"
 	"time"
 )
 
 type Config struct {
+	JournalLogin    string
+	JournalPassword string
 	Port            string
 	WidgetAPIKey    string
 	Timezone        string
@@ -13,15 +17,23 @@ type Config struct {
 }
 
 func Load() *Config {
-	port := os.Getenv("PORT")
+	port := strings.Trim(os.Getenv("PORT"), `"' `)
 	widgetAPIKey := os.Getenv("APIKEY")
+	login := os.Getenv("JOURNAL_LOGIN")
+	password := os.Getenv("JOURNAL_PASSWORD")
 	timezone := "Europe/Moscow"
 	refreshInterval := 60
 
-	if port == "" || widgetAPIKey == "" {
-		return nil
+	if login == "" || password == "" {
+		log.Fatal("JOURNAL_LOGIN and JOURNAL_PASSWORD must be set in environment")
 	}
-
+	if widgetAPIKey == "" {
+		log.Fatal("Widget APIKey must be set in environment")
+	}
+	if port == "" {
+		port = "8080"
+	}
 	return &Config{Port: port, WidgetAPIKey: widgetAPIKey,
-		Timezone: timezone, RefreshInterval: time.Duration(refreshInterval)}
+		Timezone: timezone, RefreshInterval: time.Duration(refreshInterval) * time.Minute,
+		JournalLogin: login, JournalPassword: password}
 }

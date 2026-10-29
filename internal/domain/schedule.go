@@ -2,7 +2,7 @@ package domain
 
 type Class struct {
 	NameSubject string
-	Audience    int
+	Audience    string
 	StartTime   string
 	EndTime     string
 	Duration    int
@@ -10,14 +10,13 @@ type Class struct {
 
 type ExamInfo struct {
 	NameSubject string
-	Audience    int
-	Lesson      int
+	Date        string
 }
 
 type WidgetResponse struct {
 	HasExam      bool
-	Exam         *ExamInfo `json:"exam"`
-	NextClass    *Class    `json:"next_class"`
-	CurrentClass *Class    `json:"current_class"`
+	Exam         *ExamInfo `json:"exam,omitempty"`
+	NextClass    *Class    `json:"next_class,omitempty"`
+	CurrentClass *Class    `json:"current_class,omitempty"`
 	UpdateAt     string
 }
