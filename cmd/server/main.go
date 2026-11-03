@@ -17,7 +17,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	// Контекст для фонового воркера и остановки сервера
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	cfg := config.Load(ctx)
 	tmz, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
 		log.Fatalf("failed to load timezone: %v", err)
@@ -26,10 +29,6 @@ func main() {
 	parserClient := parser.New(cfg.JournalLogin, cfg.JournalPassword)
 	scheduleCache := cache.New(tmz)
 	handler := httptransport.NewHandler(scheduleCache, cfg.WidgetAPIKey)
-
-	// Контекст для фонового воркера и остановки сервера
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	scheduleCache.StartWorker(ctx, parserClient, cfg.RefreshInterval)
 

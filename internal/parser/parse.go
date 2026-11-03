@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
+	"os"
 	"sort"
 	"time"
 
@@ -26,10 +28,18 @@ type Parser struct {
 func New(login, password string) *Parser {
 	jar, _ := cookiejar.New(nil)
 
+	transport := &http.Transport{}
+	if proxyStr := os.Getenv("PROXY_URL"); proxyStr != "" {
+		if proxyURL, err := url.Parse(proxyStr); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	}
+
 	return &Parser{
 		client: &http.Client{
-			Jar:     jar,
-			Timeout: 15 * time.Second,
+			Jar:       jar,
+			Timeout:   15 * time.Second,
+			Transport: transport,
 		},
 		login:    login,
 		password: password,
