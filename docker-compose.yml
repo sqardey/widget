@@ -5,7 +5,6 @@ services:
     build: .
     container_name: widget-server
     restart: unless-stopped
-    ports:
-      - networkmode: host
+    networkmode: "host"
     env_file:
       - .env
