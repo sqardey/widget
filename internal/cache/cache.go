@@ -88,7 +88,7 @@ func (c *ScheduleCache) GetOrUpdate(ctx context.Context, u *domain.User, force b
 	now := time.Now().In(c.Location)
 
 	// Проверяем условия, нужно ли идти в журнал Академии:
-	isFirstLoad := entry.UpdatedAt.IsZero()
+	isFirstLoad := entry.UpdatedAt.IsZero() || entry.Classes == nil
 	isNewDay := !isFirstLoad && (entry.UpdatedAt.YearDay() != now.YearDay() || entry.UpdatedAt.Year() != now.Year())
 	isExpired := !isFirstLoad && now.Sub(entry.UpdatedAt) >= AutoRefreshTTL
 	isForceAllowed := force && !isFirstLoad && now.Sub(entry.UpdatedAt) >= ManualRefreshCooldown
