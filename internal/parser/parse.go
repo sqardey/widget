@@ -28,7 +28,12 @@ type Parser struct {
 func New(login, password string) *Parser {
 	jar, _ := cookiejar.New(nil)
 
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		DisableKeepAlives:     true,
+	}
+
 	if proxyStr := os.Getenv("PROXY_URL"); proxyStr != "" {
 		if proxyURL, err := url.Parse(proxyStr); err == nil {
 			transport.Proxy = http.ProxyURL(proxyURL)
@@ -38,7 +43,7 @@ func New(login, password string) *Parser {
 	return &Parser{
 		client: &http.Client{
 			Jar:       jar,
-			Timeout:   15 * time.Second,
+			Timeout:   20 * time.Second,
 			Transport: transport,
 		},
 		login:    login,

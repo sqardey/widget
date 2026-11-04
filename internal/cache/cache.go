@@ -10,75 +10,131 @@ import (
 	"github.com/sqardey/widget/internal/parser"
 )
 
+const (
+	AutoRefreshTTL        = 3 * time.Hour
+	ManualRefreshCooldown = 1 * time.Hour
+)
+
+// ScheduleCache — общий кэш всех пользователей
 type ScheduleCache struct {
-	mu        sync.RWMutex
+	mu       sync.RWMutex
+	users    map[string]*UserCacheEntry
+	Location *time.Location
+}
+
+// UserCacheEntry — состояние и расписание одного конкретного пользователя
+type UserCacheEntry struct {
+	mu        sync.Mutex
 	Classes   []domain.Class
 	Exam      *domain.ExamInfo
 	UpdatedAt time.Time
-	Location  *time.Location
+	Parser    *parser.Parser
+	Login     string
+	Password  string
 }
 
 func New(loc *time.Location) *ScheduleCache {
 	return &ScheduleCache{
+		users:    make(map[string]*UserCacheEntry),
 		Location: loc,
 	}
 }
 
-func (c *ScheduleCache) Update(classes []domain.Class, exam *domain.ExamInfo) {
+// getOrCreateEntry безопасно достаёт или создаёт запись пользователя в мапе
+func (c *ScheduleCache) getOrCreateEntry(u *domain.User) *UserCacheEntry {
+	c.mu.RLock()
+	entry, exists := c.users[u.Key]
+	c.mu.RUnlock()
+
+	if exists {
+		return entry
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.Classes = classes
-	c.Exam = exam
-	c.UpdatedAt = time.Now().In(c.Location)
+
+	// Повторная проверка на случай гонки между RUnlock и Lock
+	if entry, exists = c.users[u.Key]; exists {
+		return entry
+	}
+
+	entry = &UserCacheEntry{
+		Parser:    parser.New(u.Login, u.Password),
+		Login:     u.Login,
+		Password:  u.Password,
+		UpdatedAt: u.UpdatedAt,
+	}
+	c.users[u.Key] = entry
+	return entry
 }
 
-func (c *ScheduleCache) GetWidgetData() domain.WidgetResponse {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	curTime := time.Now().In(c.Location).Format("15:04")
-	response := domain.WidgetResponse{
-		HasExam:  c.Exam != nil,
-		Exam:     c.Exam,
-		UpdateAt: c.UpdatedAt.Format("15:04"),
+// GetOrUpdate возвращает расписание пользователя (из памяти или обновляя из журнала).
+// Возвращает: (ответ_виджету, было_ли_реальное_обновление, ошибка)
+func (c *ScheduleCache) GetOrUpdate(ctx context.Context, u *domain.User, force bool) (domain.WidgetResponse, bool, error) {
+	entry := c.getOrCreateEntry(u)
+
+	// Блокируем только конкретного пользователя
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// Если пользователь сменил логин/пароль в БД — пересоздаём его парсер
+	if entry.Login != u.Login || entry.Password != u.Password {
+		entry.Parser = parser.New(u.Login, u.Password)
+		entry.Login = u.Login
+		entry.Password = u.Password
+		entry.UpdatedAt = time.Time{} // сбрасываем таймер для принудительного обновления
 	}
-	for _, cl := range c.Classes {
+
+	now := time.Now().In(c.Location)
+
+	// Проверяем условия, нужно ли идти в журнал Академии:
+	isFirstLoad := entry.UpdatedAt.IsZero()
+	isNewDay := !isFirstLoad && (entry.UpdatedAt.YearDay() != now.YearDay() || entry.UpdatedAt.Year() != now.Year())
+	isExpired := !isFirstLoad && now.Sub(entry.UpdatedAt) >= AutoRefreshTTL
+	isForceAllowed := force && !isFirstLoad && now.Sub(entry.UpdatedAt) >= ManualRefreshCooldown
+
+	needUpdate := isFirstLoad || isNewDay || isExpired || isForceAllowed
+
+	updated := false
+	if needUpdate {
+		classes, exam, err := entry.Parser.FetchTodaySchedule(ctx, now)
+		if err != nil {
+			log.Printf("[ERROR] key=%s fetch failed: %v", u.Key, err)
+			// Если в кэше еще вообще ничего нет — возвращаем ошибку
+			if isFirstLoad {
+				return domain.WidgetResponse{}, false, err
+			}
+			// Если старые данные за сегодня есть — не ломаем виджет, отдаём их
+		} else {
+			entry.Classes = classes
+			entry.Exam = exam
+			entry.UpdatedAt = now
+			updated = true
+			log.Printf("[INFO] key=%s schedule updated: %d classes, exam=%v", u.Key, len(classes), exam != nil)
+		}
+	}
+
+	return entry.buildResponse(now), updated, nil
+}
+
+// buildResponse вычисляет текущую и следующую пару на момент времени now
+func (e *UserCacheEntry) buildResponse(now time.Time) domain.WidgetResponse {
+	curTime := now.Format("15:04")
+	resp := domain.WidgetResponse{
+		HasExam:  e.Exam != nil,
+		Exam:     e.Exam,
+		UpdateAt: e.UpdatedAt.Format("15:04"),
+	}
+
+	for i := range e.Classes {
+		cl := e.Classes[i]
 		if cl.StartTime <= curTime && cl.EndTime > curTime {
-			response.CurrentClass = &cl
+			resp.CurrentClass = &cl
 		} else if cl.StartTime > curTime {
-			response.NextClass = &cl
+			resp.NextClass = &cl
 			break
 		}
 	}
-	return response
-}
 
-func (c *ScheduleCache) StartWorker(ctx context.Context, p *parser.Parser, interval time.Duration) {
-	update := func() {
-		now := time.Now().In(c.Location)
-		classes, exam, err := p.FetchTodaySchedule(ctx, now)
-		if err != nil {
-			log.Printf("[ERROR] failed to fetch schedule: %v", err)
-			return
-		}
-		c.Update(classes, exam)
-		log.Printf("[INFO] schedule updated: %d classes today, exam=%v", len(classes), exam != nil)
-	}
-
-	// Сразу обновляем кэш при запуске сервера
-	update()
-
-	// Дальше обновляем по таймеру в фоне
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				update()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	return resp
 }

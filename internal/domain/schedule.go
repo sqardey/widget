@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type Class struct {
 	NameSubject string `json:"name_subject"`
 	Audience    string `json:"audience"`
@@ -19,4 +21,11 @@ type WidgetResponse struct {
 	NextClass    *Class    `json:"next_class,omitempty"`
 	CurrentClass *Class    `json:"current_class,omitempty"`
 	UpdateAt     string    `json:"updated_at"`
+}
+
+type User struct {
+	Key       string
+	Login     string
+	Password  string
+	UpdatedAt time.Time
 }

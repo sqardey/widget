@@ -6,6 +6,6 @@ services:
     container_name: widget-server
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - networkmode: host
     env_file:
       - .env

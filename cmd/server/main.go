@@ -12,7 +12,7 @@ import (
 
 	"github.com/sqardey/widget/internal/cache"
 	"github.com/sqardey/widget/internal/config"
-	"github.com/sqardey/widget/internal/parser"
+	"github.com/sqardey/widget/internal/repository"
 	httptransport "github.com/sqardey/widget/internal/transport/http"
 )
 
@@ -25,12 +25,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load timezone: %v", err)
 	}
-
-	parserClient := parser.New(cfg.JournalLogin, cfg.JournalPassword)
+	db := repository.New(ctx, cfg.Dsn)
+	defer db.Close()
 	scheduleCache := cache.New(tmz)
-	handler := httptransport.NewHandler(scheduleCache, cfg.WidgetAPIKey)
-
-	scheduleCache.StartWorker(ctx, parserClient, cfg.RefreshInterval)
+	handler := httptransport.NewHandler(scheduleCache, db)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

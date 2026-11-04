@@ -1,9 +1,44 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"time"
 
-func (s *Storage) GetUserByKey(ctx context.Context, key string) (*User, error) {
-	sqlQuery := `SELECT * FROM widget_users WHERE key = $1`
-	s.Pool.QueryRow(ctx, sqlQuery, key)
+	"github.com/sqardey/widget/internal/domain"
+)
 
+func (s *Storage) GetUserByKey(ctx context.Context, key string) (*domain.User, error) {
+	sqlQuery := `SELECT login, password, updated_at FROM widget_users WHERE key = $1`
+	var user domain.User
+	err := s.Pool.QueryRow(ctx, sqlQuery, key).Scan(&user.Key, &user.Login, &user.Password, &user.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// на возможное будущее, которое возможно будет
+// func (s *Storage) GetAllUsers(ctx context.Context) ([]domain.User, error) {
+// 	var users []domain.User
+// 	sqlQuery := `SELECT key, login, password, updated_at FROM widget_users`
+// 	rows, err := s.Pool.Query(ctx, sqlQuery)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer rows.Close()
+
+// 	for rows.Next() {
+// 		var user domain.User
+// 		if err := rows.Scan(&user.Key, &user.Login, &user.Password, &user.UpdatedAt); err != nil {
+// 			return nil, err
+// 		}
+// 		users = append(users, user)
+// 	}
+// 	return users, rows.Err()
+// }
+
+func (s *Storage) TouchUserUpdatedAt(ctx context.Context, key string, t time.Time) error {
+	sqlQuery := `UPDATE widget_users SET updated_at = $1 WHERE key = $2`
+	_, err := s.Pool.Exec(ctx, sqlQuery, t, key)
+	return err
 }
