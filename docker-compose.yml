@@ -1,10 +1,33 @@
-version: "3.8"
-
 services:
-  widget:
-    build: .
-    container_name: widget-server
+  db:
+    image: postgres:16-alpine
+    container_name: widget-postgres
     restart: unless-stopped
-    networkmode: "host"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: widget_db
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations/000001_init.up.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d widget_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  widget-v2:
+    build: .
+    container_name: widget-server-v2
+    restart: unless-stopped
+    network_mode: "host"
     env_file:
       - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Storage) GetUserByKey(ctx context.Context, key string) (*domain.User, error) {
-	sqlQuery := `SELECT login, password, updated_at FROM widget_users WHERE key = $1`
+	sqlQuery := `SELECT key, login, password, updated_at FROM widget_users WHERE key = $1`
 	var user domain.User
 	err := s.Pool.QueryRow(ctx, sqlQuery, key).Scan(&user.Key, &user.Login, &user.Password, &user.UpdatedAt)
 	if err != nil {
@@ -41,4 +41,14 @@ func (s *Storage) TouchUserUpdatedAt(ctx context.Context, key string, t time.Tim
 	sqlQuery := `UPDATE widget_users SET updated_at = $1 WHERE key = $2`
 	_, err := s.Pool.Exec(ctx, sqlQuery, t, key)
 	return err
+}
+
+func (s *Storage) NewUser(ctx context.Context, login string, password string) (string, error) {
+	sqlQuery := `INSERT INTO widget_users(login, password) VALUES ($1, $2) RETURNING key`
+	var key string
+	err := s.Pool.QueryRow(ctx, sqlQuery, login, password).Scan(&key)
+	if err != nil {
+		return "", err
+	}
+	return key, nil
 }
