@@ -42,13 +42,3 @@ func (s *Storage) TouchUserUpdatedAt(ctx context.Context, key string, t time.Tim
 	_, err := s.Pool.Exec(ctx, sqlQuery, t, key)
 	return err
 }
-
-func (s *Storage) NewUser(ctx context.Context, login string, password string) (string, error) {
-	sqlQuery := `INSERT INTO widget_users(login, password) VALUES ($1, $2) RETURNING key`
-	var key string
-	err := s.Pool.QueryRow(ctx, sqlQuery, login, password).Scan(&key)
-	if err != nil {
-		return "", err
-	}
-	return key, nil
-}

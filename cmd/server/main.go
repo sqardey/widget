@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,37 +22,44 @@ func main() {
 	defer stop()
 	cfg := config.Load(ctx)
 	tmz, err := time.LoadLocation(cfg.Timezone)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 	if err != nil {
-		log.Fatalf("failed to load timezone: %v", err)
+		logger.Error("failed to load timezone", "Error", err)
+		stop()
 	}
 	db := repository.New(ctx, cfg.Dsn)
 	defer db.Close()
 	scheduleCache := cache.New(tmz)
-	handler := httptransport.NewHandler(scheduleCache, db)
+	handler := httptransport.NewHandler(scheduleCache, db, logger)
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: handler.Routes(),
+		Addr:              ":" + cfg.Port,
+		Handler:           handler.Routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      25 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Запуск HTTP-сервера в фоновой горутине
 	go func() {
-		log.Printf("Server started on :%s", cfg.Port)
+		logger.Info("Server started", "port", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen error: %v", err)
+			logger.Error("Lister error", "error", err)
+			stop()
 		}
 	}()
 
 	// Ожидание системного сигнала SIGINT / SIGTERM
 	<-ctx.Done()
-	log.Println("Shutting down gracefully...")
+	logger.Info("Shutting down gracefully...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		logger.Warn("Server forced to shutdown", "error", err)
 	}
-
-	log.Println("Server stopped cleanly")
+	logger.Info("Server stopped cleanly")
 }

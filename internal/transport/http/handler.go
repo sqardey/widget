@@ -1,67 +1,36 @@
 package http_transport
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/sqardey/widget/internal/cache"
-	"github.com/sqardey/widget/internal/domain"
 	"github.com/sqardey/widget/internal/repository"
 )
 
 type Handler struct {
-	Cache *cache.ScheduleCache
-	Repo  *repository.Storage
+	Cache  *cache.ScheduleCache
+	Repo   *repository.Storage
+	Logger *slog.Logger
 }
 
-func NewHandler(cache *cache.ScheduleCache, repo *repository.Storage) *Handler {
-	return &Handler{Cache: cache, Repo: repo}
+func NewHandler(cache *cache.ScheduleCache, repo *repository.Storage,
+	logger *slog.Logger) *Handler {
+	return &Handler{Cache: cache, Repo: repo, Logger: logger}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/widget", h.handleWidget)
-	mux.HandleFunc("POST /api/widget/newuser", h.newUser)
-	return mux
-}
-
-func (h *Handler) newUser(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var user domain.User
-	err := json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "ERROR: %v", err)
-		return
-	}
-
-	if user.Login == "" || user.Password == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, "Login and password must be entered")
-		return
-	}
-
-	classes, exam, p, err := h.Cache.ValidateCredentials(ctx, user.Login, user.Password)
-
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintln(w, "Неверный логин или пароль (либо журнал недоступен)")
-		return
-	}
-
-	key, err := h.Repo.NewUser(ctx, user.Login, user.Password)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "ERROR: %v", err)
-		return
-	}
-	user.Key = key
-	h.Cache.SeedUser(&user, p, classes, exam)
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]string{"key": key})
+	return h.requestIDMiddleware(h.loggingMiddleware(mux))
 }
 
 func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +43,13 @@ func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	user, err := h.Repo.GetUserByKey(ctx, query)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "ERROR: %v", err)
+		h.Logger.Error("failed to get user", "err", err, "request_id", getRequestID(ctx))
 		return
 	} else if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "ERROR: %v", err)
+		h.Logger.Error("failed to get user", "err", err, "request_id", getRequestID(ctx))
 		return
 	}
 	force := r.URL.Query().Get("force") == "1"
@@ -88,7 +57,6 @@ func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
 	response, updated, err := h.Cache.GetOrUpdate(ctx, user, force)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, "ERROR: %v", err)
 		return
 	}
 	if updated == true {
@@ -97,4 +65,62 @@ func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(statusCode int) {
+	rw.status = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
+}
+
+type ctxKey string
+
+const requestIDKey ctxKey = "request_id"
+
+func getRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+func (h *Handler) requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-ID")
+		if id == "" {
+			b := make([]byte, 8)
+			_, _ = rand.Read(b)
+			id = hex.EncodeToString(b)
+		}
+		w.Header().Set("X-Request-ID", id)
+		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startTime := time.Now()
+		rw := &responseWriter{w, http.StatusOK}
+		next.ServeHTTP(rw, r)
+
+		level := slog.LevelInfo
+		switch {
+		case rw.status >= 500:
+			level = slog.LevelError
+		case rw.status >= 400:
+			level = slog.LevelWarn
+		}
+		h.Logger.Log(r.Context(), level, "http request",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", rw.status),
+			slog.String("duration", time.Since(startTime).String()),
+			slog.String("request_id", getRequestID(r.Context())),
+		)
+	})
 }

@@ -8,15 +8,10 @@ services:
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: widget_db
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations/000001_init.up.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d widget_db"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
 
   widget-v2:
     build: .
@@ -26,8 +21,7 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
-        condition: service_healthy
+      - db
 
 volumes:
   pgdata:

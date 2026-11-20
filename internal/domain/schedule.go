@@ -24,8 +24,8 @@ type WidgetResponse struct {
 }
 
 type User struct {
-	Key       string    `json:"key,omitempty"`
-	Login     string    `json:"login"`
-	Password  string    `json:"password"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Key       string
+	Login     string
+	Password  string
+	UpdatedAt time.Time
 }

@@ -40,31 +40,6 @@ func New(loc *time.Location) *ScheduleCache {
 	}
 }
 
-func (c *ScheduleCache) ValidateCredentials(ctx context.Context, login, password string) ([]domain.Class, *domain.ExamInfo, *parser.Parser, error) {
-	p := parser.New(login, password)
-	now := time.Now().In(c.Location)
-	classes, exam, err := p.FetchTodaySchedule(ctx, now)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return classes, exam, p, nil
-}
-
-// SeedUser сохраняет уже скачанное при регистрации расписание под реальным ключом из БД
-func (c *ScheduleCache) SeedUser(u *domain.User, p *parser.Parser, classes []domain.Class, exam *domain.ExamInfo) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.users[u.Key] = &UserCacheEntry{
-		Classes:   classes,
-		Exam:      exam,
-		UpdatedAt: time.Now().In(c.Location),
-		Parser:    p,
-		Login:     u.Login,
-		Password:  u.Password,
-	}
-}
-
 // getOrCreateEntry безопасно достаёт или создаёт запись пользователя в мапе
 func (c *ScheduleCache) getOrCreateEntry(u *domain.User) *UserCacheEntry {
 	c.mu.RLock()
