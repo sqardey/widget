@@ -9,4 +9,3 @@ CREATE TABLE IF NOT EXISTS widget_users (
 
 CREATE INDEX IF NOT EXISTS idx_widget_users_key ON widget_users(key);
 CREATE INDEX IF NOT EXISTS idx_widget_users_tg_id ON widget_users(tg_id);
-INSERT INTO widget_users(tg_id, key, login, password) VALUES (123, 'key123', 'REDACTED', 'REDACTED');
