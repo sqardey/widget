@@ -3,12 +3,14 @@ package http_transport
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +18,9 @@ import (
 	"github.com/sqardey/widget/internal/domain"
 	"github.com/sqardey/widget/internal/repository"
 )
+
+//go:embed widget.js
+var widgetTemplate string
 
 type Handler struct {
 	Cache     *cache.ScheduleCache
@@ -33,6 +38,7 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/widget", h.handleWidget)
 	mux.HandleFunc("POST /api/widget/newuser", h.newUserHandler)
+	mux.HandleFunc("GET /api/widget/script", h.handleWidgetScript)
 	return h.requestIDMiddleware(h.loggingMiddleware(mux))
 }
 
@@ -153,4 +159,18 @@ func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
 			slog.String("request_id", getRequestID(r.Context())),
 		)
 	})
+}
+
+func (h *Handler) handleWidgetScript(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	script := strings.ReplaceAll(widgetTemplate, "{{API_KEY}}", key)
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="IT_TOP_Widget.js"`)
+	_, _ = w.Write([]byte(script))
 }
