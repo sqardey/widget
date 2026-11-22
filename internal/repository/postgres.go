@@ -2,25 +2,28 @@ package repository
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Storage struct {
-	Pool *pgxpool.Pool
+	Pool   *pgxpool.Pool
+	Logger *slog.Logger
 }
 
-func New(ctx context.Context, dsn string) *Storage {
+func New(ctx context.Context, dsn string, logger *slog.Logger) (*Storage, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		log.Fatalf("Error to connect from database! %v", err)
+		logger.Error("Error to connect from database", "error", err)
+		return nil, err
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		log.Fatalf("Error to ping database! %v", err)
+		logger.Error("Error to ping database", "error", err)
+		return nil, err
 	}
-	return &Storage{Pool: pool}
+	return &Storage{Pool: pool, Logger: logger}, nil
 
 }
 

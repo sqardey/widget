@@ -20,18 +20,24 @@ func main() {
 	// Контекст для фонового воркера и остановки сервера
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	cfg := config.Load(ctx)
-	tmz, err := time.LoadLocation(cfg.Timezone)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	cfg, err := config.Load(ctx, logger)
+	if err != nil {
+		os.Exit(1)
+	}
+	tmz, err := time.LoadLocation(cfg.Timezone)
 
 	if err != nil {
 		logger.Error("failed to load timezone", "Error", err)
-		stop()
+		os.Exit(1)
 	}
-	db := repository.New(ctx, cfg.Dsn)
+	db, err := repository.New(ctx, cfg.Dsn, logger)
+	if err != nil {
+		os.Exit(1)
+	}
 	defer db.Close()
-	scheduleCache := cache.New(tmz)
-	handler := httptransport.NewHandler(scheduleCache, db, logger)
+	scheduleCache := cache.New(tmz, logger)
+	handler := httptransport.NewHandler(scheduleCache, db, logger, cfg.BotSecret)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

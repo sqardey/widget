@@ -13,23 +13,26 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/sqardey/widget/internal/cache"
+	"github.com/sqardey/widget/internal/domain"
 	"github.com/sqardey/widget/internal/repository"
 )
 
 type Handler struct {
-	Cache  *cache.ScheduleCache
-	Repo   *repository.Storage
-	Logger *slog.Logger
+	Cache     *cache.ScheduleCache
+	Repo      *repository.Storage
+	Logger    *slog.Logger
+	BotSecret string
 }
 
 func NewHandler(cache *cache.ScheduleCache, repo *repository.Storage,
-	logger *slog.Logger) *Handler {
-	return &Handler{Cache: cache, Repo: repo, Logger: logger}
+	logger *slog.Logger, botSecret string) *Handler {
+	return &Handler{Cache: cache, Repo: repo, Logger: logger, BotSecret: botSecret}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/widget", h.handleWidget)
+	mux.HandleFunc("POST /api/widget/newuser", h.newUserHandler)
 	return h.requestIDMiddleware(h.loggingMiddleware(mux))
 }
 
@@ -65,6 +68,33 @@ func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) newUserHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Bot-Secret") != h.BotSecret || h.BotSecret == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	var user domain.User
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		h.Logger.Warn("Failed decode JSON", "err", err)
+		return
+	}
+	if user.Login == "" || user.Password == "" || user.TelegramID == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	key, err := h.Repo.PutNewUser(r.Context(), user.TelegramID, user.Login, user.Password)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		h.Logger.Error("Failed write new user to database", "error", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"key": key})
 }
 
 type responseWriter struct {

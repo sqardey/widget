@@ -2,7 +2,7 @@ package cache
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -20,6 +20,7 @@ type ScheduleCache struct {
 	mu       sync.RWMutex
 	users    map[string]*UserCacheEntry
 	Location *time.Location
+	logger   *slog.Logger
 }
 
 // UserCacheEntry — состояние и расписание одного конкретного пользователя
@@ -33,10 +34,11 @@ type UserCacheEntry struct {
 	Password  string
 }
 
-func New(loc *time.Location) *ScheduleCache {
+func New(loc *time.Location, logger *slog.Logger) *ScheduleCache {
 	return &ScheduleCache{
 		users:    make(map[string]*UserCacheEntry),
 		Location: loc,
+		logger:   logger,
 	}
 }
 
@@ -99,7 +101,7 @@ func (c *ScheduleCache) GetOrUpdate(ctx context.Context, u *domain.User, force b
 	if needUpdate {
 		classes, exam, err := entry.Parser.FetchTodaySchedule(ctx, now)
 		if err != nil {
-			log.Printf("[ERROR] key=%s fetch failed: %v", u.Key, err)
+			c.logger.Warn("ERROR fecth failed", "err", err)
 			// Если в кэше еще вообще ничего нет — возвращаем ошибку
 			if isFirstLoad {
 				return domain.WidgetResponse{}, false, err
@@ -110,7 +112,7 @@ func (c *ScheduleCache) GetOrUpdate(ctx context.Context, u *domain.User, force b
 			entry.Exam = exam
 			entry.UpdatedAt = now
 			updated = true
-			log.Printf("[INFO] key=%s schedule updated: %d classes, exam=%v", u.Key, len(classes), exam != nil)
+			c.logger.Info("Schedule updated", "key", u.Key, "classes", len(classes), "exam", exam != nil)
 		}
 	}
 

@@ -1,6 +1,8 @@
 package domain
 
-import "time"
+import (
+	"time"
+)
 
 type Class struct {
 	NameSubject string `json:"name_subject"`
@@ -24,8 +26,9 @@ type WidgetResponse struct {
 }
 
 type User struct {
-	Key       string
-	Login     string
-	Password  string
-	UpdatedAt time.Time
+	TelegramID int64     `json:"tg_id"`
+	Key        string    `json:"key,omitempty"`
+	Login      string    `json:"login"`
+	Password   string    `json:"password"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
