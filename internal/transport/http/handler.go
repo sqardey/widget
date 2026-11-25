@@ -22,6 +22,9 @@ import (
 //go:embed widget.js
 var widgetTemplate string
 
+//go:embed widget_v2.js
+var widgetTemplateV2 string
+
 type Handler struct {
 	Cache     *cache.ScheduleCache
 	Repo      *repository.Storage
@@ -39,6 +42,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/widget", h.handleWidget)
 	mux.HandleFunc("POST /api/widget/newuser", h.newUserHandler)
 	mux.HandleFunc("GET /api/widget/script", h.handleWidgetScript)
+	mux.HandleFunc("GET /api/widget/script/v2", h.handleWidgetScriptv2)
 	return h.requestIDMiddleware(h.loggingMiddleware(mux))
 }
 
@@ -170,6 +174,18 @@ func (h *Handler) handleWidgetScript(w http.ResponseWriter, r *http.Request) {
 
 	script := strings.ReplaceAll(widgetTemplate, "{{API_KEY}}", key)
 
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="IT_TOP_Widget.js"`)
+	_, _ = w.Write([]byte(script))
+}
+
+func (h *Handler) handleWidgetScriptv2(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	script := strings.ReplaceAll(widgetTemplateV2, "{{API_KEY}}", key)
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="IT_TOP_Widget.js"`)
 	_, _ = w.Write([]byte(script))
