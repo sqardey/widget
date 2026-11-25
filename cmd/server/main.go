@@ -17,7 +17,6 @@ import (
 )
 
 func main() {
-	// Контекст для фонового воркера и остановки сервера
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -48,7 +47,6 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Запуск HTTP-сервера в фоновой горутине
 	go func() {
 		logger.Info("Server started", "port", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -57,7 +55,6 @@ func main() {
 		}
 	}()
 
-	// Ожидание системного сигнала SIGINT / SIGTERM
 	<-ctx.Done()
 	logger.Info("Shutting down gracefully...")
 

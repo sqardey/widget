@@ -4,7 +4,7 @@ const KEY = "{{KEY}}";
 // Адрес сервера (новый сервер работает на порту 8081)
 // Если скрипт запущен нажатием на виджет (?force=1), просим сервер обновить данные
 const FORCE = (args.queryParameters && args.queryParameters.force === "1") ? "&force=1" : "";
-const API_URL = "http://64.188.65.31:8081/api/widget?key=" + encodeURIComponent(KEY) + FORCE;
+const API_URL = "http://widget.sqardey.xyz/api/widget?key=" + encodeURIComponent(KEY) + FORCE;
 
 // Загружаем данные и возвращаем { data, error }
 async function loadData() {
