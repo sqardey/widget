@@ -23,7 +23,7 @@ const C = {
 //  Данные
 // ------------------------------------------------------------
 const FORCE = (args.queryParameters && args.queryParameters.force === "1") ? "&force=1" : "";
-const API_URL = "http://widget.sqardey.xyz:8081/api/widget?key=" + encodeURIComponent(KEY) + FORCE;
+const API_URL = "https://widget.sqardey.xyz/api/widget?key=" + encodeURIComponent(KEY) + FORCE;
 
 async function loadData() {
   try {

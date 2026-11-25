@@ -36,10 +36,19 @@ func main() {
 	}
 	defer db.Close()
 	scheduleCache := cache.New(tmz, logger)
-	handler := httptransport.NewHandler(scheduleCache, db, logger, cfg.BotSecret)
+	handler, err := httptransport.NewHandler(
+		scheduleCache,
+		db,
+		logger,
+		cfg.BotSecret,
+	)
+	if err != nil {
+		logger.Error("Failed to initialize handler", "error", err)
+		os.Exit(1)
+	}
 
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              "127.0.0.1:" + cfg.Port,
 		Handler:           handler.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

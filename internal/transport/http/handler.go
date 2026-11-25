@@ -2,6 +2,7 @@ package http_transport
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
@@ -26,15 +27,26 @@ var widgetTemplate string
 var widgetTemplateV2 string
 
 type Handler struct {
-	Cache     *cache.ScheduleCache
-	Repo      *repository.Storage
-	Logger    *slog.Logger
-	BotSecret string
+	Cache             *cache.ScheduleCache
+	Repo              *repository.Storage
+	Logger            *slog.Logger
+	credentialsCipher cipher.AEAD
+	BotSecret         string
 }
 
 func NewHandler(cache *cache.ScheduleCache, repo *repository.Storage,
-	logger *slog.Logger, botSecret string) *Handler {
-	return &Handler{Cache: cache, Repo: repo, Logger: logger, BotSecret: botSecret}
+	logger *slog.Logger, botSecret string) (*Handler, error) {
+	h := &Handler{
+		Cache:     cache,
+		Repo:      repo,
+		Logger:    logger,
+		BotSecret: botSecret,
+	}
+	if err := h.InitEncryption(); err != nil {
+		return nil, fmt.Errorf("init encryption: %w", err)
+	}
+
+	return h, nil
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -49,30 +61,66 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) handleWidget(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("key")
 	if query == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintln(w, "api key not be has empty")
+		http.Error(w, "API key is required", http.StatusUnauthorized)
 		return
 	}
 
 	ctx := r.Context()
+
 	user, err := h.Repo.GetUserByKey(ctx, query)
 	if errors.Is(err, pgx.ErrNoRows) {
 		w.WriteHeader(http.StatusUnauthorized)
-		h.Logger.Error("failed to get user", "err", err, "request_id", getRequestID(ctx))
-		return
-	} else if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		h.Logger.Error("failed to get user", "err", err, "request_id", getRequestID(ctx))
 		return
 	}
+	if err != nil {
+		h.Logger.Error(
+			"Failed to get user",
+			"error", err,
+			"request_id", getRequestID(ctx),
+		)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	login, err := h.decrypt(user.Login)
+	if err != nil {
+		h.Logger.Error(
+			"Failed to decrypt login",
+			"error", err,
+			"request_id", getRequestID(ctx),
+		)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	password, err := h.decrypt(user.Password)
+	if err != nil {
+		h.Logger.Error(
+			"Failed to decrypt password",
+			"error", err,
+			"request_id", getRequestID(ctx),
+		)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	user.Login = login
+	user.Password = password
+
 	force := r.URL.Query().Get("force") == "1"
 
 	response, updated, err := h.Cache.GetOrUpdate(ctx, user, force)
 	if err != nil {
+		h.Logger.Error(
+			"Failed to get schedule",
+			"error", err,
+			"request_id", getRequestID(ctx),
+		)
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	if updated == true {
+
+	if updated {
 		h.Repo.TouchUserUpdatedAt(ctx, user.Key, time.Now())
 	}
 
@@ -85,23 +133,35 @@ func (h *Handler) newUserHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+
 	var user domain.User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.Logger.Warn("Failed decode JSON", "err", err)
 		return
 	}
+
 	if user.Login == "" || user.Password == "" || user.TelegramID == 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	key, err := h.Repo.PutNewUser(r.Context(), user.TelegramID, user.Login, user.Password)
+	encryptedLogin := h.encrypt(user.Login)
+	encryptedPassword := h.encrypt(user.Password)
+
+	key, err := h.Repo.PutNewUser(
+		r.Context(),
+		user.TelegramID,
+		encryptedLogin,
+		encryptedPassword,
+	)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		h.Logger.Error("Failed write new user to database", "error", err)
 		return
 	}
+	h.Cache.Invalidate(key)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]string{"key": key})
@@ -173,6 +233,11 @@ func (h *Handler) handleWidgetScript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	script := strings.ReplaceAll(widgetTemplate, "{{API_KEY}}", key)
+	script = strings.ReplaceAll(
+		script,
+		"{{BASE_URL}}",
+		"https://widget.sqardey.xyz",
+	)
 
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="IT_TOP_Widget.js"`)
